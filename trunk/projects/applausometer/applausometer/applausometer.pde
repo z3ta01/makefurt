@@ -2,6 +2,7 @@
 $Id$
 
 MAKEfurt Applausometer
+Code vom untergeek
 */
 
 // PIN mapping
