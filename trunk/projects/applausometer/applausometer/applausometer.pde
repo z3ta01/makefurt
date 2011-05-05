@@ -5,7 +5,6 @@ MAKEfurt Applausometer
 Code vom untergeek und vom byteborg
 
 TODO:
-- Maximalanzahl von Steps herausfinden
 - Analog-Input-Lautstärkemeter an den Analog-In anbasteln
 
 */
@@ -32,7 +31,7 @@ Bounce button = Bounce(BUTTON_START, BOUNCE_TIME);
 
 // stepper config & vars
 #define STEP_DELAY 2
-#define STEP_MAX 3000
+#define STEP_MAX 765  //ausprobiert; 5.5.2011 untergeek
 #define LEFT 1
 #define RIGHT 2
 const byte StepperIndex[4] = {
