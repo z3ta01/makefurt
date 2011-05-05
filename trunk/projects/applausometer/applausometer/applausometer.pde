@@ -20,39 +20,51 @@ TODO:
 #define STEP_BP 4
 #define STEP_BN 2
 #define LAMP 6
-
 // IN
 #define BUTTON_START 5
 #define GATE_END 3
-
-// stepper config
-#define STEP_DELAY 2
-#define STEP_MAX 3000
-#define LEFT 1
-#define RIGHT 2
+// analog
+#define ANPIN 1
 
 // button config
 #define BOUNCE_TIME 100
 Bounce button = Bounce(BUTTON_START, BOUNCE_TIME);
 
+// stepper config & vars
+#define STEP_DELAY 2
+#define STEP_MAX 3000
+#define LEFT 1
+#define RIGHT 2
 const byte StepperIndex[4] = {
   STEP_AP, STEP_AN, STEP_BP, STEP_BN,
 } ;
-
 const boolean StepperVal[8][4] = {
-{    1,0,1,0  },
-  {    0,1,1,0  },
-  {    0,1,0,1  },
-  {    1,0,0,1  },
+  { 1,0,1,0 },
+  { 0,1,1,0 },
+  { 0,1,0,1 },
+  { 1,0,0,1 },
 }; 
-
+static int position = -1; // negativer Wert = Position nicht definiert
 // Raucht der Kopf? Gut. Bester Link, um zu kapieren, was passiert:
 // http://www.cvengineering.ch/index-Dateien/Der_Schrittmotor.htm
 
 
-static int position = -1; // negativer Wert = Position nicht definiert
+// Heartbeat State
 static byte hbstate = LOW;
 
+// Sampling Setup & Buffer
+#define BUFSIZE 256 // wieviel Punkte sampeln?
+#define MAINDELAY 100 // ms
+int slen = 0;
+int sbuf[BUFSIZE];
+#define AN_INTERP 5 // Stützstellen Interpolation
+#define AN_INTERD 7 // Delay für Interpolation in ms
+
+
+/***
+ *** Utility Stuff
+ ***/
+   
 // throw error, grind to a halt, give nothing back ;-)
 void error(char* s) {
   Serial.println("---ERROR---");
@@ -71,6 +83,10 @@ void heartBeat() {
   digitalWrite(HEARTBEAT, hbstate);
 }
 
+/***
+ *** Stepper Operation
+ ***/
+ 
 // Schauen, ob der Stepper den Schlitten in die Null gefahren hat
 // Gibt true zurück, wenn die Nullposition erreicht und die Gabellichtschranke unterbrochen ist
 boolean nullSensor()
@@ -78,7 +94,7 @@ boolean nullSensor()
   return (digitalRead(GATE_END) == 1); 
 }
 
-
+// Stepper in Nullposition fahren ("Kalibrieren")
 void zeroStepper()
 {
   int safetyCount = position; //bei definierter Position: maximal so viele Schritte nach links
@@ -90,9 +106,9 @@ void zeroStepper()
     if (safetyCount <=0)  error("zeroStepper() reached safetyCount");
   }
   position = 0; 
-
 }
 
+// Motor abschalten
 void shutdownStepper() {
   digitalWrite(STEP_AP,0);
   digitalWrite(STEP_AN,0);
@@ -100,6 +116,7 @@ void shutdownStepper() {
   digitalWrite(STEP_BN,0);
 }
 
+// eins nach links steppen
 void _stepLeftOne()
 {
     for (int s=0; s<4; s++)
@@ -111,6 +128,7 @@ void _stepLeftOne()
     }
 }
 
+// eins nach rechts steppen
 void _stepRightOne()
 {
   int s;
@@ -124,6 +142,7 @@ void _stepRightOne()
     } 
 }
 
+// relativ positionieren
 void stepRelative(int steps) {
   if (steps < 0) {
     for (int i=steps; i!=0; i++) _stepLeftOne();
@@ -132,13 +151,53 @@ void stepRelative(int steps) {
   }
   // Wir sind da, Strom abschalten
   shutdownStepper();
+  position = position + steps;
 }
 
-
+// absolut positionieren
 void stepAbsolute(int dest) {
   stepRelative(dest-position); 
 }
 
+/***
+ *** Analog Input: Lautstärke messen
+ ***/
+
+/*
+Lautstärkemessung - Theory of Operation
+
+1. initSampling() setzt den Messdatenspeicher zurück
+
+2. sample() wird mit einer vorgegebenen Frequenz (Main-Loop? Timer?) 
+   aufgerufen und schreibt Messdaten in den Puffer
+
+3. int finishSampling() ermittelt den Durchschnitt im 
+   Puffer und gibt ihn zurück
+*/
+
+void startSampling() { 
+  slen = 0;
+}
+
+void sample() {
+  byte b = 0;
+  long inbuf = 0;
+  for (b=0; b<AN_INTERP; b++) {
+    inbuf =+ analogRead(ANPIN);
+    delay(AN_INTERD);
+  }
+  sbuf[slen] = inbuf / AN_INTERP;
+  slen++;
+}
+
+int finishSampling() {
+  // return average of sampled values
+  return 123;
+}
+
+/***
+ *** Arduino initialisieren
+ ***/
 
 void setup()
 {
@@ -165,24 +224,37 @@ void setup()
   Serial.println(" OK");
 }
 
-int runstate = 0;
+
+/***
+ *** Arduino laufen lassen (main loop)
+ ***/
+
+int runstate = 0; // Laufzeit Statusvariable
 void loop()
 {
-  heartBeat();
+  heartBeat(); // blinken
+  
   if (button.update()) { // knopp auslesen
     if (button.fallingEdge()) { // knopp gedrückt
-      if (runstate == 0) { // fahren
-      Serial.print("0");
-        stepRelative(500);
-        runstate = 1; // danach: zurückfahren
-      } else if (runstate == 1) { // zurückfahren
-      Serial.print("1");
-        stepRelative(-500);
-        runstate = 0; // danach: wieder fahren
-      }
+      if (runstate == 0) { // 0 ist stop, nichtstun
+      Serial.print("messen...");
+        startSampling();
+        runstate = 1; // nächstes: messung
+      } 
     } // knopp gedrückt
   } // knopp auslesen
-  delay(100);
+  
+  if (runstate == 1) { // 1 == messen
+    sample();
+    if (slen >= BUFSIZE) {
+      runstate = 2;
+    }
+  } else if (runstate == 2) { // 2 == ausgeben
+    stepAbsolute(finishSampling());
+    runstate = 0; // stop
+  }
+    
+  delay(MAINDELAY);
 }
 
 
