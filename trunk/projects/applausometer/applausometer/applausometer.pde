@@ -3,13 +3,29 @@ $Id$
 
 MAKEfurt Applausometer
 Code vom untergeek und vom byteborg
+DAC und FFT von Didier Longueville (Arduinoos)
 
 TODO:
 - Analog-Input-Lautstärkemeter an den Analog-In anbasteln
 
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 */
 
 #include <Bounce.h>
+#include <PlainDAC.h>
+#include <PlainFFT.h>
 
 // PIN mapping
 // OUT
@@ -52,12 +68,24 @@ static int position = -1; // negativer Wert = Position nicht definiert
 static byte hbstate = LOW;
 
 // Sampling Setup & Buffer
-#define BUFSIZE 256 // wieviel Punkte sampeln?
-#define MAINDELAY 100 // ms
-int slen = 0;
-int sbuf[BUFSIZE];
-#define AN_INTERP 5 // Stützstellen Interpolation
-#define AN_INTERD 7 // Delay für Interpolation in ms
+#define MAINDELAY 100 /* ms */
+uint8_t slen = 0;
+#define SMAX 10 /* wie oft messen */
+uint8_t peak = 0;
+PlainDAC DAC = PlainDAC();
+PlainFFT FFT = PlainFFT();
+/* Acquisition parameters */
+const uint16_t channel = ANPIN; /* Set default channel value */
+const uint16_t samplingFrequency = 8000; /* Set default sampling frequency value */
+const uint8_t acqMode = DAC_ACQ_MOD_DOUBLE; /* Set default acquisition mode value */
+const uint16_t samples = 128; /* Set default samples value */
+const uint8_t vRef = DAC_REF_VOL_DEFAULT; /* Set default voltage reference value */
+/* Reference spectrum */
+uint8_t vRefSpectrum[(samples >> 1)];
+uint8_t vActSpectrum[(samples >> 1)];
+uint8_t threshold = 10;
+//uint8_t targetMatch = 50;
+
 
 
 /***
@@ -159,40 +187,99 @@ void stepAbsolute(int dest) {
 }
 
 /***
- *** Analog Input: Lautstärke messen
+ *** Audio Input Software-only Ansatz mit FFT
  ***/
 
-/*
-Lautstärkemessung - Theory of Operation
-
-1. initSampling() setzt den Messdatenspeicher zurück
-
-2. sample() wird mit einer vorgegebenen Frequenz (Main-Loop? Timer?) 
-   aufgerufen und schreibt Messdaten in den Puffer
-
-3. int finishSampling() ermittelt den Durchschnitt im 
-   Puffer und gibt ihn zurück
-*/
-
-void startSampling() { 
-  slen = 0;
+// Sample Buffer per A/D befüllen, FFT machen und ablegen
+void getSpectrum(void) {
+	/* Initialize data vector */
+	uint8_t *vData = (uint8_t*)malloc(samples * sizeof(double)); 
+	/* Acquire data in bytes array */
+	DAC.AcquireData(vData, channel); 
+	/* Reallocate memory space to doubles array for real values */
+	double *vReal = (double*)realloc(vData, samples * sizeof(double)); 
+	/* Adjust signal level */
+	for (uint16_t i = 0; i < samples; i++) {
+		vReal[i] = (((vReal[i] * 5.0) / 1024.0) - 2.5);
+	}
+	/* Allocate memory space to doubles array for imaginary values (all 0ed) */
+	double *vImag = (double*)calloc(samples, sizeof(double)); 
+	/* Weigh data */
+	FFT.Windowing(vReal, samples, FFT_WIN_TYP_HAMMING, FFT_FORWARD); 
+	/* Compute FFT */
+	FFT.Compute(vReal, vImag, samples, FFT_FORWARD); 
+	/* Compute magnitudes */
+	FFT.ComplexToMagnitude(vReal, vImag, samples);
+	/* Find max value */
+	double max = 0;
+	for (uint16_t i = 1; i < ((samples >> 1) - 1); i++) {
+		if (vReal[i] > max) max = vReal[i];
+	}
+	/* Clean, normalize and store data in actual spectrum */
+	for (uint16_t i = 1; i < ((samples >> 1) - 1); i++) {
+		if ((vReal[i-1] < vReal[i]) && (vReal[i] > vReal[i+1]) 
+                    && (uint8_t(vReal[i] * 100.0 / max) > threshold)) {
+			vActSpectrum[i] = uint8_t((vReal[i] * 255.0) / max);
+		}
+		else {
+			vActSpectrum[i] = 0;
+		}
+	}
+	/* Release memory space */
+	free(vReal);
+	free(vImag);	
 }
 
-void sample() {
-  byte b = 0;
-  long inbuf = 0;
-  for (b=0; b<AN_INTERP; b++) {
-    inbuf =+ analogRead(ANPIN);
-    delay(AN_INTERD);
-  }
-  sbuf[slen] = inbuf / AN_INTERP;
-  slen++;
+// Aus dem letzten gemessenen Spektrum ein Referenzspektrum machen
+void setRefSpectrum(void) {
+/* Copy actual spectrum in ref spectrum */
+	for (uint16_t i = 1; i < ((samples >> 1) - 1); i++) {
+		vRefSpectrum[i] = vActSpectrum[i];
+	}
 }
 
-int finishSampling() {
-  // return average of sampled values
-  return 123;
+void printSpectrum(uint8_t *vSpectrum) {
+/* For diagnostics purposes */
+	for (uint16_t i = 0; i < (samples >> 1); i++) {
+		Serial.print(((i * 1.0 * samplingFrequency) / samples), 2);
+		Serial.print(" ");
+		Serial.print(vSpectrum[i], DEC);
+		Serial.println();	
+	}
 }
+
+uint8_t matchSpectra(void) {
+/* Compute the match criteria between the reference spectrum and the actual spectrum 
+	 The result is expressed in percent and ranges strictly from 0% to 100% */
+	uint16_t sumOfRefOrAct = 0;
+	uint16_t sumOfAbsDiff = 0;
+	for (uint16_t i = 1; i < ((samples >> 1) - 1); i++) {
+		/* Compute absolute differences between reference and actual spectra */
+		uint8_t diff;
+		if (vRefSpectrum[i] > vActSpectrum[i]){
+			diff = (vRefSpectrum[i] - vActSpectrum[i]);
+			sumOfRefOrAct += vRefSpectrum[i];
+		}
+		else if (vActSpectrum[i] > vRefSpectrum[i]){
+			diff = (vActSpectrum[i] - vRefSpectrum[i]);
+			sumOfRefOrAct += vActSpectrum[i];			
+		} 
+		else {
+			diff = 0;
+			sumOfRefOrAct += vRefSpectrum[i];
+		}
+		sumOfAbsDiff += diff;
+	}
+	if (sumOfRefOrAct != 0x00) {
+		/* Returns the matching value in pct */
+		return(uint8_t(((sumOfRefOrAct - sumOfAbsDiff) * 100.0) / sumOfRefOrAct));
+	}
+	else {
+		/* Reference spectrum not set */
+		return(0x00);
+	}
+}
+
 
 /***
  *** Arduino initialisieren
@@ -200,26 +287,30 @@ int finishSampling() {
 
 void setup()
 {
-  Serial.begin(38400);
-  Serial.print("1");
+  Serial.begin(115200);
+  Serial.print("ATZ0");
   // hearteat init
   pinMode(HEARTBEAT, OUTPUT);
   digitalWrite(HEARTBEAT, LOW);
   // lichtschranke init
-  Serial.print("2");
+  Serial.print(".");
   pinMode (GATE_END, INPUT);
   digitalWrite (GATE_END, HIGH);
   // button init
-  Serial.print("3");
+  Serial.print(".");
   pinMode(BUTTON_START, INPUT);
   digitalWrite(BUTTON_START, HIGH);
   // stepper init
-  Serial.print("3");
+  Serial.print(".");
   pinMode (STEP_AP, OUTPUT);
   pinMode (STEP_BP, OUTPUT);
   pinMode (STEP_AN, OUTPUT);
   pinMode (STEP_BN, OUTPUT);
   zeroStepper();
+  // DAC init
+  Serial.print(".");
+  DAC.SetAcquisitionParameters(samplingFrequency, samples, acqMode, vRef);
+  DAC.StartAcquisitionEngine();	
   Serial.println(" OK");
 }
 
@@ -228,28 +319,41 @@ void setup()
  *** Arduino laufen lassen (main loop)
  ***/
 
-int runstate = 0; // Laufzeit Statusvariable
-void loop()
-{
+void loop() {
+  uint8_t runstate = 0; // Laufzeit Statusvariable
+  uint8_t tmp = 0;
   heartBeat(); // blinken
+  
+  // Audio
+  getSpectrum();
+  
   
   if (button.update()) { // knopp auslesen
     if (button.fallingEdge()) { // knopp gedrückt
-      if (runstate == 0) { // 0 ist stop, nichtstun
-      Serial.print("messen...");
-        startSampling();
+      if (runstate == 0) { // 0: standby -> 1: messen
         runstate = 1; // nächstes: messung
       } 
     } // knopp gedrückt
   } // knopp auslesen
   
-  if (runstate == 1) { // 1 == messen
-    sample();
-    if (slen >= BUFSIZE) {
+  if (runstate == 0) { // 0: standby
+    getSpectrum();
+    setRefSpectrum();
+    slen = 0;
+    peak = 0;
+  } else if (runstate == 1) { // 1: messen
+    getSpectrum();
+    tmp = matchSpectra();
+    if (tmp > peak) {
+      peak = tmp;
+    }
+    if (slen > SMAX) { // Ende Messung wenn max. Anzahl messungen erreicht
       runstate = 2;
     }
-  } else if (runstate == 2) { // 2 == ausgeben
-    stepAbsolute(finishSampling());
+    slen++;
+  } else if (runstate == 2) { // 2: ausgeben
+    //stepAbsolute(finishSampling());
+    Serial.println(peak);
     runstate = 0; // stop
   }
     
