@@ -33,13 +33,13 @@ uint8_t _acqMode;
 uint8_t _vRef;
 uint16_t _samples;
 /* Test pins from PORTB */
-const uint8_t cycleSyncPin = PINB0; /* TODO: Comment in normal operation mode */
-const uint8_t adcSyncPin = PINB1; /* TODO: Comment in normal operation mode */
+//const uint8_t cycleSyncPin = PINB0; /* TODO: Comment in normal operation mode */
+//const uint8_t adcSyncPin = PINB1; /* TODO: Comment in normal operation mode */
 
 PlainDAC::PlainDAC(void) 
 {
 /* Constructor */
-	DDRB |=  ((1 << cycleSyncPin) | (1 << adcSyncPin));  /* TODO: Comment in normal operation mode */
+//	DDRB |=  ((1 << cycleSyncPin) | (1 << adcSyncPin));  /* TODO: Comment in normal operation mode */
 };
 
 PlainDAC::~PlainDAC(void) 
@@ -176,11 +176,11 @@ void PlainDAC::AcquireData(uint8_t *vData, uint8_t channel)
 	uint16_t acquiredSamples = 0;
 	int16_t lastAdcValue = 0; /* This variable is used for delta encoding mode */
 	_dataAcqStatus = DAC_DAT_ACQ_WAITING;
-	PORTB &= ~(1 << cycleSyncPin); /* TODO: Comment in normal operation mode */
+	//PORTB &= ~(1 << cycleSyncPin); /* TODO: Comment in normal operation mode */
 	/* Set acquisition status */
 	do {
 		if (_dataAcqStatus == DAC_DAT_ACQ_TRIGGERED) {
-			PORTB |=  (1 << adcSyncPin); /* TODO: Comment in normal operation mode */
+//			PORTB |=  (1 << adcSyncPin); /* TODO: Comment in normal operation mode */
 			int16_t adcValue = ((_adcMSBs << 8) | _adcLSBs);
 			/* Store data */
 			switch(_acqMode) {
@@ -215,7 +215,7 @@ void PlainDAC::AcquireData(uint8_t *vData, uint8_t channel)
 			_dataAcqStatus = DAC_DAT_ACQ_WAITING; /* Toggle status */
 		}
 	} while (acquiredSamples != _samples);
-	PORTB |=  (1 << cycleSyncPin); /* TODO: Comment in normal operation mode */
+//	PORTB |=  (1 << cycleSyncPin); /* TODO: Comment in normal operation mode */
 	_dataAcqStatus = DAC_DAT_ACQ_IDLE; /* Reset status */
 	TIMSK0 = originalTIMSK0; /* Restore timer/counter0 operation */
 };
@@ -337,7 +337,7 @@ ISR(TIMER1_COMPB_vect)
 ISR(ADC_vect)
 {
 /* Invoked on completion of conversions */
-	PORTB &= ~(1 << adcSyncPin); /* TODO: Comment in normal operation mode */
+//	PORTB &= ~(1 << adcSyncPin); /* TODO: Comment in normal operation mode */
 	if (_dataAcqStatus == DAC_DAT_ACQ_WAITING) {
 		/* When both LSBs and MSBs are to be read, LSBs MUST be read first */
 		if (_acqMode != DAC_ACQ_MOD_UINT8) {

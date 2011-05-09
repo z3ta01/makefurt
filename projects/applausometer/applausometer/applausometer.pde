@@ -70,7 +70,7 @@ static byte hbstate = LOW;
 // Sampling Setup & Buffer
 #define MAINDELAY 100 /* ms */
 uint8_t slen = 0;
-#define SMAX 10 /* wie oft messen */
+#define SMAX 100 /* wie oft messen */
 uint8_t peak = 0;
 PlainDAC DAC = PlainDAC();
 PlainFFT FFT = PlainFFT();
@@ -83,7 +83,7 @@ const uint8_t vRef = DAC_REF_VOL_DEFAULT; /* Set default voltage reference value
 /* Reference spectrum */
 uint8_t vRefSpectrum[(samples >> 1)];
 uint8_t vActSpectrum[(samples >> 1)];
-uint8_t threshold = 10;
+uint8_t threshold = 5;
 //uint8_t targetMatch = 50;
 
 
@@ -270,6 +270,7 @@ uint8_t matchSpectra(void) {
 		}
 		sumOfAbsDiff += diff;
 	}
+
 	if (sumOfRefOrAct != 0x00) {
 		/* Returns the matching value in pct */
 		return(uint8_t(((sumOfRefOrAct - sumOfAbsDiff) * 100.0) / sumOfRefOrAct));
@@ -318,32 +319,31 @@ void setup()
 /***
  *** Arduino laufen lassen (main loop)
  ***/
-
-void loop() {
   uint8_t runstate = 0; // Laufzeit Statusvariable
   uint8_t tmp = 0;
+
+void loop() {
   heartBeat(); // blinken
-  
-  // Audio
-  getSpectrum();
-  
-  
+    
   if (button.update()) { // knopp auslesen
     if (button.fallingEdge()) { // knopp gedrückt
       if (runstate == 0) { // 0: standby -> 1: messen
         runstate = 1; // nächstes: messung
+            Serial.print("Button");
       } 
     } // knopp gedrückt
   } // knopp auslesen
+
+  // Audio
+  getSpectrum();
   
   if (runstate == 0) { // 0: standby
-    getSpectrum();
     setRefSpectrum();
     slen = 0;
     peak = 0;
   } else if (runstate == 1) { // 1: messen
-    getSpectrum();
     tmp = matchSpectra();
+    Serial.println((int)tmp);
     if (tmp > peak) {
       peak = tmp;
     }
@@ -353,11 +353,12 @@ void loop() {
     slen++;
   } else if (runstate == 2) { // 2: ausgeben
     //stepAbsolute(finishSampling());
-    Serial.println(peak);
+    Serial.print("PK: ");
+    Serial.print((int)peak);
     runstate = 0; // stop
   }
     
-  delay(MAINDELAY);
+  //delay(MAINDELAY);
 }
 
 
