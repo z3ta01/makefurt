@@ -341,7 +341,8 @@ void loop() {
     setRefSpectrum();
     slen = 0;
     peak = 0;
-  } else if (runstate == 1) { // 1: messen
+  } 
+  else if (runstate == 1) { // 1: messen
     tmp = matchSpectra();
     Serial.println((int)tmp);
     if (tmp > peak) {
@@ -351,7 +352,8 @@ void loop() {
       runstate = 2;
     }
     slen++;
-  } else if (runstate == 2) { // 2: ausgeben
+  } 
+  else if (runstate == 2) { // 2: ausgeben
     //stepAbsolute(finishSampling());
     Serial.print("PK: ");
     Serial.print((int)peak);
