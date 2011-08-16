@@ -39,7 +39,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define BUTTON_START 5
 #define GATE_END 3
 // analog
-#define ANPIN 1
+#define ANPIN A1
 
 // button config
 #define BOUNCE_TIME 100
