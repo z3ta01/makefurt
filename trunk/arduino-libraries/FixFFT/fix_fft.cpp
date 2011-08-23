@@ -31,6 +31,8 @@
   Made portable:  Malcolm Slaney 12/15/94 malcolm@interval.com
   Enhanced:  Dimitrios P. Bouras  14 Jun 2006 dbouras@ieee.org
   Modified for 8bit values David Keller  10.10.2010
+  Fixed data type: 8bit signed for unsigned (byte instead of byte variables) --
+  untergeek@makefurt.de 22-Aug-11
 */
 
 
@@ -46,6 +48,7 @@
 */
 
 
+// signed 8-bit values written into Arduino's 32k EEPROM memory
 
 const prog_int8_t Sinewave[N_WAVE-N_WAVE/4] PROGMEM = {
 0, 3, 6, 9, 12, 15, 18, 21,
@@ -96,7 +99,7 @@ const prog_int8_t Sinewave[N_WAVE-N_WAVE/4] PROGMEM = {
   optimization suited to a particluar DSP processor.
   Scaling ensures that result remains 16-bit.
 */
-inline char FIX_MPY(char a, char b)
+inline byte FIX_MPY(byte a, byte b)
 {
   
   //Serial.println(a);
@@ -125,10 +128,10 @@ inline char FIX_MPY(char a, char b)
   RESULT (in-place FFT), with 0 <= n < 2**m; set inverse to
   0 for forward transform (FFT), or 1 for iFFT.
 */
-int fix_fft(char fr[], char fi[], int m, int inverse)
+int fix_fft(byte fr[], byte fi[], int m, int inverse)
 {
     int mr, nn, i, j, l, k, istep, n, scale, shift;
-    char qr, qi, tr, ti, wr, wi;
+    byte qr, qi, tr, ti, wr, wi;
 
     n = 1 << m;
 
@@ -249,10 +252,10 @@ Serial.println("");*/
   that fix_fft "sees" consecutive real samples as alternating
   real and imaginary samples in the complex array.
 */
-int fix_fftr(char f[], int m, int inverse)
+int fix_fftr(byte f[], int m, int inverse)
 {
     int i, N = 1<<(m-1), scale = 0;
-    char tt, *fr=f, *fi=&f[N];
+    byte tt, *fr=f, *fi=&f[N];
 
     if (inverse)
 	  scale = fix_fft(fi, fr, m-1, inverse);
