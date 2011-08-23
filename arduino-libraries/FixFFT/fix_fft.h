@@ -12,7 +12,7 @@
   RESULT (in-place FFT), with 0 <= n < 2**m; set inverse to
   0 for forward transform (FFT), or 1 for iFFT.
 */
-int fix_fft(char fr[], char fi[], int m, int inverse);
+int fix_fft(byte fr[], byte fi[], int m, int inverse);
 
 
 
@@ -30,7 +30,7 @@ int fix_fft(char fr[], char fi[], int m, int inverse);
   that fix_fft "sees" consecutive real samples as alternating
   real and imaginary samples in the complex array.
 */
-int fix_fftr(char f[], int m, int inverse);
+int fix_fftr(byte f[], int m, int inverse);
 
 
 
