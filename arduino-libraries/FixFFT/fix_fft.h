@@ -11,8 +11,10 @@
   fr[n],fi[n] are real and imaginary arrays, both INPUT AND
   RESULT (in-place FFT), with 0 <= n < 2**m; set inverse to
   0 for forward transform (FFT), or 1 for iFFT.
+
+  Results are from 0 to n/2, (fr[0];fi[0]) contains DC component.
 */
-int fix_fft(byte fr[], byte fi[], int m, int inverse);
+int fix_fft(char fr[], char fi[], int m, int inverse);
 
 
 
@@ -30,9 +32,21 @@ int fix_fft(byte fr[], byte fi[], int m, int inverse);
   that fix_fft "sees" consecutive real samples as alternating
   real and imaginary samples in the complex array.
 */
-int fix_fftr(byte f[], int m, int inverse);
+int fix_fftr(char f[], int m, int inverse);
 
+/* 
+	fft_windowing() - perform windowing on data to eliminate noise
+	The windowing function is performed on the sample data, calculating a
+	"fade in/fade out", thereby minimizing errors resulting from real-world data
+	which is not the exact frequency loop a FFT would require.
+	Works like a sort of lowpass filter.
+	Called with the sample data array as a parameter. Real-world sample data normally
+	does not contain imaginary components - if windowing for complex data is needed call it
+	on the complex and imaginary part separately.
 
+	Parameters: f is source and target array, m is number of bits (e.g. 0 <= n < 2**m)
+*/
+void fft_windowing(char f[], int m);
 
 
 #endif 

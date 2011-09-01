@@ -2,16 +2,18 @@
 #include "fix_fft.h"
 #include <WProgram.h>
 
+//#define TEST_FFT_WINDOWING
+
 /* fix_fft.c - Fixed-point in-place Fast Fourier Transform  */
 /*
-  All data are fixed-point short integers, in which -32768
-  to +32768 represent -1.0 to +1.0 respectively. Integer
+  All data are fixed-point short integers, in which -128
+  to +128 represent -1.0 to +1.0 respectively. Integer
   arithmetic is used for speed, instead of the more natural
   floating-point.
 
   For the forward FFT (time -> freq), fixed scaling is
   performed to prevent arithmetic overflow, and to map a 0dB
-  sine/cosine wave (i.e. amplitude = 32767) to two -6dB freq
+  sine/cosine wave (i.e. amplitude = 127) to two -6dB freq
   coefficients. The return value is always 0.
 
   For the inverse FFT (freq -> time), fixed scaling cannot be
@@ -31,26 +33,23 @@
   Made portable:  Malcolm Slaney 12/15/94 malcolm@interval.com
   Enhanced:  Dimitrios P. Bouras  14 Jun 2006 dbouras@ieee.org
   Modified for 8bit values David Keller  10.10.2010
-  Fixed data type: 8bit signed for unsigned (byte instead of byte variables) --
+  Fixed data type: 8bit signed for unsigned (char instead of byte variables),
+  fixed errors, added comment, added windowing function (Hanning) --
   untergeek@makefurt.de 22-Aug-11
 */
 
 
 #define N_WAVE	256    /* full length of Sinewave[] */
+#define N_WAVE_HALF   128   
 #define LOG2_N_WAVE 8	/* log2(N_WAVE) */
 
-
-
-
-/*
-  Since we only use 3/4 of N_WAVE, we define only
-  this many samples, in order to conserve data space.
-*/
-
+// Pseudo-cosine function for 2pi equalling N_WAVE = 256.
+// Shifting by "pi/2", e.g. N_WAVE/4, gives sine.
 
 // signed 8-bit values written into Arduino's 32k EEPROM memory
+// Technically we could get along with a quarter of this data table but I think we shouldn't.
 
-const prog_int8_t Sinewave[N_WAVE-N_WAVE/4] PROGMEM = {
+const prog_int8_t Sinewave[N_WAVE] PROGMEM = {
 0, 3, 6, 9, 12, 15, 18, 21,
 24, 28, 31, 34, 37, 40, 43, 46,
 48, 51, 54, 57, 60, 63, 65, 68,
@@ -78,18 +77,33 @@ const prog_int8_t Sinewave[N_WAVE-N_WAVE/4] PROGMEM = {
 -118, -119, -120, -121, -122, -123, -124, -124,
 -125, -126, -126, -127, -127, -127, -127, -127,
 
-/*-127, -127, -127, -127, -127, -127, -126, -126,
+-127, -127, -127, -127, -127, -127, -126, -126,
 -125, -124, -124, -123, -122, -121, -120, -119,
 -118, -117, -115, -114, -112, -111, -109, -108,
 -106, -104, -102, -100, -98, -96, -94, -92,
 -90, -88, -85, -83, -81, -78, -76, -73,
 -71, -68, -65, -63, -60, -57, -54, -51,
 -48, -46, -43, -40, -37, -34, -31, -28,
--24, -21, -18, -15, -12, -9, -6, -3, */
+-24, -21, -18, -15, -12, -9, -6, -3, 
 };
 
 
+/*
+	SIN8 and COS8 - 8-bit pseudo sine and cosine for better handling. 
+	Normalized to y * N_WAVE_HALF and x * N_WAVE / 2pi .
+	Returns char value which can be used for integer arithmetic
+*/
 
+inline char SIN8(int n)
+{
+  return pgm_read_byte_near(Sinewave+n);
+}
+
+inline char COS8(int n)
+{
+  n = (n + N_WAVE/4) % N_WAVE;
+  return pgm_read_byte_near(Sinewave+n);
+}
 
 
 
@@ -99,7 +113,7 @@ const prog_int8_t Sinewave[N_WAVE-N_WAVE/4] PROGMEM = {
   optimization suited to a particluar DSP processor.
   Scaling ensures that result remains 16-bit.
 */
-inline byte FIX_MPY(byte a, byte b)
+inline char FIX_MPY(char a, char b)
 {
   
   //Serial.println(a);
@@ -123,15 +137,49 @@ inline byte FIX_MPY(byte a, byte b)
 }
 
 /*
+  void fft_windowing(char f[], int m)
+
+  perform windowing on sampled data to eliminate noise in fft bands
+  von Hann (raised cosine) function with simple 16-bit arithmetic to compensate for rounding errors
+  fw(n) = f(n) * (0.5 - 0.5 * (cos(2 * pi * n / M)))
+
+  Aug 2011 untergeek@makefurt.de
+*/
+void fft_windowing(char f[], int m)
+{
+    int M = 1 << m;
+    int n, rad;
+    for (n = 0; n < M; n++) {
+#ifdef TEST_FFT_WINDOWING
+	Serial.print(n, DEC);
+	Serial.print(":");
+	Serial.print(f[n], DEC);
+	Serial.print(" weighted by ");
+#endif
+        rad = (N_WAVE * n) / M;		// calculate index for pseudo-cos function from lookup table
+                                        // N_WAVE is 2pi, so to speak, so calculate N_WAVE* n / M
+					// Pseudo cos lookup table contains values from -127É127, so
+					// set 0.5cos(n) to be sinewave[n]/256, accepting 1bit error.
+        f[n] = char((f[n]*(127 - COS8(rad) ) ) / 256);
+// is                      0.5 - 0.5 cos(2 * pi* n / M)
+#ifdef TEST_FFT_WINDOWING
+	Serial.print(COS8(n), DEC);
+	Serial.print(" -> "); 
+	Serial.println(f[n], DEC);
+#endif
+    }
+}
+
+/*
   fix_fft() - perform forward/inverse fast Fourier transform.
   fr[n],fi[n] are real and imaginary arrays, both INPUT AND
   RESULT (in-place FFT), with 0 <= n < 2**m; set inverse to
   0 for forward transform (FFT), or 1 for iFFT.
 */
-int fix_fft(byte fr[], byte fi[], int m, int inverse)
+int fix_fft(char fr[], char fi[], int m, int inverse)
 {
     int mr, nn, i, j, l, k, istep, n, scale, shift;
-    byte qr, qi, tr, ti, wr, wi;
+    char qr, qi, tr, ti, wr, wi;
 
     n = 1 << m;
 
@@ -199,17 +247,21 @@ int fix_fft(byte fr[], byte fi[], int m, int inverse)
 	  for (m=0; m<l; ++m) {
 		j = m << k;
 		/* 0 <= j < N_WAVE/2 */
-		wr =  pgm_read_word_near(Sinewave + j+N_WAVE/4);
+		wr =  COS8(j);
 
-/*Serial.println("asdfasdf");
-Serial.println(wr);
-Serial.println(j+N_WAVE/4);
-Serial.println(Sinewave[256]);
+#ifdef TEST_FFT
 
-Serial.println("");*/
+Serial.println("asdfasdf");
+Serial.println(wr, DEC);
+Serial.println(j+N_WAVE/4, DEC);
+Serial.println(Sinewave[j+N_WAVE/4]);
+
+Serial.println("");
+
+#endif
 
 
-		wi = -pgm_read_word_near(Sinewave + j);
+		wi = -SIN8(j);
 		if (inverse)
 		    wi = -wi;
 		if (shift) {
@@ -252,10 +304,10 @@ Serial.println("");*/
   that fix_fft "sees" consecutive real samples as alternating
   real and imaginary samples in the complex array.
 */
-int fix_fftr(byte f[], int m, int inverse)
+int fix_fftr(char f[], int m, int inverse)
 {
     int i, N = 1<<(m-1), scale = 0;
-    byte tt, *fr=f, *fi=&f[N];
+    char tt, *fr=f, *fi=&f[N];
 
     if (inverse)
 	  scale = fix_fft(fi, fr, m-1, inverse);
