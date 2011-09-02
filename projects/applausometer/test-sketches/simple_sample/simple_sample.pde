@@ -1,5 +1,8 @@
 #include <fix_fft.h>
-#define TEST 1
+#include <avr/interrupt.h>
+#include <avr/io.h>
+
+//#define TEST 1
 #define BUTTON 12
 
 const int dm = 8;           // Größe der Datenfelder 2**dm
@@ -22,16 +25,19 @@ int dirtySample(int * d, int n)
 // Routine berechnet beim Samplen den Mittelwert der gesampelten Werte und gibt ihn zurück 
 // Dieser Wert ist in der Folge für die Berechnung der Null-Linie wichtig
 {
-  long sum = 0;
+  long sum;
   int ii;         
 // Okay: sauber ist das nicht - auch nicht sauber getimed. Sampelt mit etwa 32kHz - später durch sauberes Sampling mit,
 // sagen wir mal, 10kHz ersetzen. 
+  sum = 0; 
   for (ii=0; ii < n; ii++) { 
     d[ii] = analogRead(0);   // Vorzeichenlose 8-Bit-Werte lesen
     sum += d[ii] ;
   }
   return sum / n ;         // Mittelwert der Samples; braucht man zum Normalisieren. 
 }
+
+void histogram(char d[],int n);
 
 
 int sampleProcess(int * d, char * dr, char * di)
@@ -52,18 +58,14 @@ int sampleProcess(int * d, char * dr, char * di)
 #define LO_DYN  10
 {
   int ii, tmp, offset, prescale, volume;
-  long sum = 0;
+  long sum;
 // "Normale" Vorverstärkung: Interne 5V-Referenz.
   analogReference(DEFAULT);
   offset = dirtySample(d,M);
+  sum = 0;
   for (ii=0; ii < M; ii++) {
     tmp = d[ii] - offset;            // auf DC-Offset - ab jetzt haben wir vorzeichenbehaftete Werte
     sum += tmp * tmp;               // Berechnung des quadratischen Mittels für die Amplitudenabschätzung
-#ifdef TEST
-      Serial.print(tmp,DEC);
-      Serial.print(",  ");
-      if ((ii % 16) == 15) Serial.println();
-#endif
     };
 // Dynamikbereich anpassen, auf 8 Bit normalisieren
 // Wenn nötig, drehen wir sogar die Vorverstärkung hoch. 
@@ -83,10 +85,10 @@ int sampleProcess(int * d, char * dr, char * di)
      offset = dirtySample(d,M);         // nochmal samplen
      prescale = 0;
      volume = 1;  
-   } else if (tmp < 64) {              // Amplitude im 8Bit-Bereich? (Werte -128...127)
+   } else if (tmp < 40) {              // Amplitude im 8Bit-Bereich? (Werte -128...127)
    prescale = 0;                        // Kein Divisor nötig, aber nicht nochmal samplen
    volume = 2; 
-     } else if (tmp < 128) {              // Amplitude im 9-Bit-Bereich? (Werte -256...255)
+     } else if (tmp < 80) {              // Amplitude im 9-Bit-Bereich? (Werte -256...255)
         prescale = 1;                    // Divisor 2 (also um 1 bit schieben)
        volume = 4; } else {
          volume = 8;
@@ -116,7 +118,8 @@ int sampleProcess(int * d, char * dr, char * di)
       
     }    
 // Den Imaginärteil nicht vergessen und durchgängig auf 0 setzen    
-    for (ii=0; ii < M; ii++) id[ii] = 0;
+   for (ii=0; ii < M; ii++) id[ii] = 0;
+//   histogram(rd,M);
 // Hier ganz wildes C: Ein Quasi-Rückgabewert - Routine setzt eine public-Variable.
 // Später löschen; dient nur dem Debugging.
   dcoffset = offset;
@@ -151,21 +154,21 @@ int rms8(char d[], int n)
 const char hheight = 16;        //H√∂he des Histogramms
 const char hdiv = 128/hheight;  //Divisor (erleichtert dem Compiler die Optimierung
 
-void histogram(char d[])
+void histogram(char d[], int n)
 
-#define SCHMAL 1
+#define SCHMAL 80
 {
   
    int yy, xx, div;
    Serial.write(12);         //FF character - vielleicht verstehts der Serial Monitor
    Serial.println("+---HISTOGRAM---->");
    for (yy = hheight; yy > 0; yy--) {
-     div = (yy-1) * hdiv;
-     
-     #ifdef SCHMAL
+     div = (yy-1) * hdiv + (hdiv / 2);
+   if (n > SCHMAL) {
+
      /* Dieser Code quetscht zwei Werte in eine Spalte - aber wir haben genug Platz, also aufheben und weg: */
 
-    for (xx=0; xx < M_HALF; xx++) {    // Eine Histogrammsäule enthält sozusagen 2 Spalten.
+    for (xx=0; xx < n; xx++) {    // Eine Histogrammsäule enthält sozusagen 2 Spalten.
        if (d[xx] > div) { 
          if (d[xx+1] > div)   
             Serial.print('#'); else    // Wenn linke und rechte Spalte leuchten
@@ -173,14 +176,14 @@ void histogram(char d[])
           else if (d[xx+1] > div) 
             Serial.print(']'); else
             Serial.print('.');
-     } 
-     #else
-    for (xx=0; xx < M_HALF; xx++) {    // Eine Histogrammsäule enthält sozusagen 2 Spalten.
-       if (d[xx] > div)     
-            Serial.print('#'); else    // Wenn linke und rechte Spalte leuchten
-            Serial.print('.');
      }
-    #endif 
+   } else { 
+    for (xx=0; xx < n; xx++) {    // Ganz normale Histogrammsäule. 
+     if (d[xx] > div)     
+          Serial.print('#'); else    // Wenn linke und rechte Spalte leuchten
+          Serial.print('.');
+     }
+   } 
      Serial.println(" ");
    }
 }
@@ -201,8 +204,12 @@ void setup()
     //ein Taster die Leitung 12 auf Null zieht. 
     
 void loop() {
-  while (digitalRead(BUTTON) == 0) {
+  while (digitalRead(BUTTON) != 0) {
     digitalWrite( 13, HIGH );
+    delay(50);
+    digitalWrite(13,LOW);
+    delay(200); }
+  digitalWrite(13, HIGH);
 // Jetzt einmal durchsamplen.
 // SampleProcess() tut genau das: Samplen und die Samples dann aufbereiten.
 // Heraus kommen die gesampelten Werte in rd[] und der Imaginärteil (nach dem Sampeln alle 0) in id[].
@@ -229,20 +236,25 @@ void loop() {
 // dB-Skala durchführen, aber: kommt Zeit, kommt Umrechnung. 
 // So, jetzt haben wir Daten, es kann losgehen.    
 
-   fft_windowing(rd,dm);              // Windowing-Funktion (von Hann / "raised-cosine"), um FFT-Fehler zu dämpfen
+   fft_windowing(rd,dm);              // Einfache Windowing-Funktion (von Hann / "raised-cosine"), um FFT-Fehler zu dämpfen
    fix_fft(rd,id,dm,0);               // Parameter: rd und id sind die char-Arrays mit den Daten, 
                                       // dm ist die Bit-Anzahl der Sample-Breite M. 
 //
     for (i=0; i< M_HALF;i++){                                  
+#ifdef TEST
+      Serial.print(rd[i],DEC);
+      Serial.print("/");
+      Serial.print(id[i],DEC);
+      Serial.print(",  ");
+      if ((i % 16) == 15) Serial.println();
+#endif
       rd[i] = sqrt(rd[i] * rd[i] + id[i] * id[i]);  // Real- und Imagin√§rteil aufsummieren
-
       }; 
-    histogram(rd);
+    histogram(rd,M_HALF);
     data[0] = 0;                       // DC-Anteil herausrechnen
     Serial.println();
     Serial.print("Quadrierter Mittelwert FFT ");
     Serial.println(rms8(rd,M)*volume);
     digitalWrite( 13, LOW );
     delay(500);
-    };
 };
