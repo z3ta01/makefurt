@@ -511,7 +511,7 @@ void loop() {
       Serial.print(time,DEC);
       Serial.print(") lvl = ");
       Serial.println(tmp,DEC);
-      stepRelative (tmp / SCALE_APPLAUSE);
+      stepRelative (-(tmp / SCALE_APPLAUSE));
       applausSum += tmp / SCALE_APPLAUSE;     // nicht zu groß werden lassen
       while ((millis() - tmp2) < FRAME_DELAY) ; // 1 Zyklus abwarten
       time++;   
