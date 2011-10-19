@@ -1,5 +1,4 @@
 /*
-$Id: applausometer.pde 14 2011-08-16 18:30:51Z karsten@rohrbach.de $
 
 MAKEfurt Applausometer
 Code vom untergeek und vom byteborg
@@ -9,6 +8,9 @@ Angeregt vom FFT-Analyser von Paul Bishop (http://blurtime.blogspot.com/2010/11/
 
 
 TODO:
+
+(IRGENDWAS IST DA NOCH FAUL!)
+
 - "Highscore" ab dem 2. Applaus
 - Auto-Rücklauf der Skala nach einer Zeit. 
 - Befehle über serielle Schnittstelle entgegennehmen. 
@@ -27,6 +29,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
+
+#define TEST2
 
 #include <Bounce.h>
 #include <TimerOne.h>     // Library für Interruptroutinen
@@ -68,10 +72,10 @@ Bounce button = Bounce(BUTTON_START, BOUNCE_TIME);
 
 #define APPLAUSE_LO_BAND 20    // entspricht 1kHz
 #define APPLAUSE_HI_BAND 64    // bis zur maximal analysierbaren Frequenz von 3,2kHz
-#define APPLAUSE_LEVEL 120     // Unterhalb dieser Amplitude gibt's keinen Applaus.
-#define APPLAUSE_THRESHOLD 30 
+#define APPLAUSE_LEVEL 40     // Unterhalb dieser Amplitude gibt's keinen Applaus.
+#define APPLAUSE_THRESHOLD 20
 
-#define SCALE_APPLAUSE 16      // Prescale applausSum => Applausometer-Skala
+#define SCALE_APPLAUSE 2      // Prescale applausSum => Applausometer-Skala
 
 // Hier etwas experimentelles Wissen über Beifall: 
 // Beifall ist relativ breitbandig (was Wunder), geht in Richtung rosa Rauschen - 
@@ -86,8 +90,8 @@ Bounce button = Bounce(BUTTON_START, BOUNCE_TIME);
 
 
 const int dm = 7;           // Größe der Datenfelder 2**dm
-const int M_HALF = 1 << (dm-1); // 2**dm-1 = 128 
-const int M = 1 << dm;    // 2**8 = 256
+const int M_HALF = 1 << (dm-1); // 2**dm-1 = 64 
+const int M = 1 << dm;    // 2**7 = 128
 
 // bestimmt die Anzahl der FFT-Frequenzb√§nder und damit
 // alles andere: Samplezahl, Speicherverbrauch etc.
@@ -243,10 +247,10 @@ int isApplause()
    fft_windowing(rd,dm);              // Einfache Windowing-Funktion (von Hann / "raised-cosine"), um FFT-Fehler zu dämpfen
    fix_fft(rd,id,dm,0);               // Parameter: rd und id sind die char-Arrays mit den Daten, 
                                       // dm ist die Bit-Anzahl der Sample-Breite M. 
+histogram(rd,M_HALF);
    for (ii = APPLAUSE_LO_BAND; ii < APPLAUSE_HI_BAND; ii++) 
-     sum += ((long) rd[ii]* (long) rd[ii]);
+     sum += (long) rd[ii] * (long) rd[ii];
    sum = sqrt(sum / (APPLAUSE_HI_BAND - APPLAUSE_LO_BAND)) * volume; 
-   if (sum < APPLAUSE_THRESHOLD) return 0;
    return sum;
 }
 
@@ -458,9 +462,9 @@ void setup()
  *** Arduino laufen lassen (main loop)
  ***/
   uint8_t runstate = 0; // Laufzeit Statusvariable
-  uint8_t tmp = 0;
-  uint8_t tmp2 = 0;
-  uint8_t time = 0; 
+  int tmp = 0;
+  int tmp2 = 0;
+  int time = 0; 
 
 void loop() {
   heartBeat(); // blinken
@@ -476,16 +480,27 @@ void loop() {
   } // knopp auslesen
 
   if (runstate == 0) { // 0: standby
+   volume = sampleProcess(data, rd, id);
+   Serial.println(amplitude); 
+//   fft_windowing(rd,dm);              // Einfache Windowing-Funktion (von Hann / "raised-cosine"), um FFT-Fehler zu dämpfen
+//   fix_fft(rd,id,dm,0);               // Parameter: rd und id sind die char-Arrays mit den Daten,
+//   histogram(rd,M_HALF); 
     delay(MAIN_DELAY); 
   } 
   else if (runstate == 1) { // 1: messen; Applausometer ist scharf
   
     Serial.println();
     Serial.println("WAITING FOR APPLAUSE TO COMMENCE");
-    while (isApplause == 0) { // warte auf Applaus
-   
+    tmp = 0;
+    while (tmp <= APPLAUSE_THRESHOLD) { // warte auf Applaus
+      tmp = isApplause();
+      Serial.print(amplitude,DEC);
+      Serial.print("  -");
+      Serial.println(tmp,DEC);
     }
     Serial.println("APPLAUSE DETECTED, START MEASUREMENT");
+    Serial.print("INITIAL LEVEL ");
+    Serial.println(tmp,DEC);
     histogram(rd,M_HALF);
     applausSum = 0;
     do {
@@ -493,9 +508,9 @@ void loop() {
       tmp2 = millis();
       tmp = isApplause();
       Serial.print("(t = ");
-      Serial.print(time);
+      Serial.print(time,DEC);
       Serial.print(") lvl = ");
-      Serial.println(tmp);
+      Serial.println(tmp,DEC);
       stepRelative (tmp / SCALE_APPLAUSE);
       applausSum += tmp / SCALE_APPLAUSE;     // nicht zu groß werden lassen
       while ((millis() - tmp2) < FRAME_DELAY) ; // 1 Zyklus abwarten
@@ -503,9 +518,9 @@ void loop() {
     } while (tmp > 0) ;
     Serial.println();
     Serial.print("END APPLAUSE - total ");
-    Serial.print(applausSum);
+    Serial.print(applausSum,DEC);
     Serial.print(" in ");
-    Serial.print(time);
+    Serial.print(time,DEC);
     Serial.println("s ");
     // Licht ist aus, zurück auf Null, dann Licht an und auf Max-Wert warten.
     digitalWrite(LAMP, LOW);
